@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>رتم — تتبع العادات والتدوين</title>
+<title>Rhythm — تتبع العادات والتدوين</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#111111">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="رتم">
+<meta name="apple-mobile-web-app-title" content="Rhythm">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -170,6 +170,37 @@
 
   .loading{text-align:center;padding:100px 20px;color:var(--text-faint);font-size:14px;}
 
+  .toast{
+    position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);
+    background:var(--accent);color:var(--accent-contrast);padding:12px 22px;border-radius:24px;
+    font-size:14px;font-weight:600;box-shadow:0 6px 24px rgba(0,0,0,.25);opacity:0;transition:opacity .3s,transform .3s;
+    z-index:9999;white-space:nowrap;max-width:90vw;overflow:hidden;text-overflow:ellipsis;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+
+  /* Books */
+  .book-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px;margin-bottom:16px;}
+  .book-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:10px;}
+  .book-title-wrap{min-width:0;}
+  .book-title{font-size:17px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .book-author{font-size:12.5px;color:var(--text-dim);margin-top:2px;}
+  .book-status{font-size:11px;padding:4px 10px;border-radius:20px;background:var(--surface-2);border:1px solid var(--border);color:var(--text-dim);white-space:nowrap;flex-shrink:0;}
+  .book-status.done{background:var(--accent);color:var(--accent-contrast);border-color:var(--accent);}
+  .book-progress-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+  .book-bar-track{flex:1;height:10px;background:var(--surface-2);border-radius:6px;overflow:hidden;}
+  .book-bar-fill{height:100%;background:var(--accent);border-radius:6px;transition:width .3s ease;}
+  .book-pages-input{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+  .book-pages-input input{width:56px;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 6px;border-radius:7px;font-family:'JetBrains Mono',monospace;font-size:12.5px;text-align:center;outline:none;}
+  .book-pages-input input:focus{border-color:var(--text);}
+  .book-pages-sep{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text-faint);}
+  .book-pct{font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--text-dim);flex-shrink:0;width:38px;text-align:left;}
+  .book-notes-label{font-size:12px;color:var(--text-faint);margin-bottom:6px;}
+  .book-notes{width:100%;min-height:80px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);padding:12px;font-family:'Cairo',sans-serif;font-size:14px;line-height:1.7;resize:vertical;outline:none;transition:.15s;}
+  .book-notes:focus{border-color:var(--text);}
+  .book-notes::placeholder{color:var(--text-faint);}
+  .book-meta-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}
+  .book-save-hint{font-size:11px;color:var(--text-faint);}
+
   @media (max-width:600px){
     .hero h1{font-size:28px;}
     .stats{gap:10px;}
@@ -188,7 +219,7 @@
 const DOW_LABELS = ['أحد','اثن','ثلا','أرب','خمي','جمع','سبت'];
 const MONTH_LABELS = ['ينا','فبر','مار','أبر','ماي','يون','يول','أغس','سبت','أكت','نوف','ديس'];
 
-let state = { habits: [], journal: {} };
+let state = { habits: [], journal: {}, books: [], readingGoal: null };
 let theme = 'light';
 let activeTab = 'habits';
 let histYear = new Date().getFullYear();
@@ -248,6 +279,8 @@ if('serviceWorker' in navigator){
 async function loadState(){
   try{ const h = await storage.get('ratm-habits'); if(h && h.value) state.habits = JSON.parse(h.value); }catch(e){ state.habits = []; }
   try{ const j = await storage.get('ratm-journal'); if(j && j.value) state.journal = JSON.parse(j.value); }catch(e){ state.journal = {}; }
+  try{ const b = await storage.get('ratm-books'); if(b && b.value) state.books = JSON.parse(b.value); }catch(e){ state.books = []; }
+  try{ const rg = await storage.get('ratm-reading-goal'); if(rg && rg.value) state.readingGoal = JSON.parse(rg.value); }catch(e){ state.readingGoal = null; }
   try{ const t = await storage.get('ratm-theme'); if(t && t.value) theme = t.value; }catch(e){ theme='light'; }
   // backfill createdAt for habits saved before this feature existed
   state.habits.forEach(h=>{
@@ -270,6 +303,8 @@ async function loadState(){
 }
 async function saveHabits(){ try{ await storage.set('ratm-habits', JSON.stringify(state.habits)); }catch(e){ console.error(e); } }
 async function saveJournal(){ try{ await storage.set('ratm-journal', JSON.stringify(state.journal)); }catch(e){ console.error(e); } }
+async function saveBooks(){ try{ await storage.set('ratm-books', JSON.stringify(state.books)); }catch(e){ console.error(e); } }
+async function saveReadingGoal(){ try{ await storage.set('ratm-reading-goal', JSON.stringify(state.readingGoal)); }catch(e){ console.error(e); } }
 async function saveTheme(){ try{ await storage.set('ratm-theme', theme); }catch(e){ console.error(e); } }
 
 function playChime(){
@@ -312,6 +347,35 @@ function computePercentage(habit){
   const start = habit.createdAt || todayStr();
   const elapsed = Math.max(1, daysBetween(start, todayStr())+1);
   return Math.min(100, Math.round((total/elapsed)*100));
+}
+
+const MILESTONES = [7, 30, 100];
+function milestoneBadge(streak){
+  if(streak>=100) return '🏆';
+  if(streak>=30) return '🥈';
+  if(streak>=7) return '🥉';
+  return '';
+}
+function showToast(msg){
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  requestAnimationFrame(()=> el.classList.add('show'));
+  setTimeout(()=>{
+    el.classList.remove('show');
+    setTimeout(()=> el.remove(), 300);
+  }, 3200);
+}
+function checkMilestone(habit){
+  const s = computeStreaks(habit);
+  habit.celebrated = habit.celebrated || [];
+  MILESTONES.forEach(m=>{
+    if(s.current>=m && !habit.celebrated.includes(m)){
+      habit.celebrated.push(m);
+      showToast(`🎉 ${m} يوم متتالي في «${habit.name}»!`);
+    }
+  });
 }
 
 function buildYearWeeks(year){
@@ -360,7 +424,7 @@ window.toggleEntry = function(el){
   const wasOn = !!habit.entries[date];
   habit.entries[date] = !wasOn;
   if(!habit.entries[date]) delete habit.entries[date];
-  if(!wasOn && date===todayStr()) playChime();
+  if(!wasOn && date===todayStr()){ playChime(); checkMilestone(habit); }
   saveHabits(); render();
 };
 
@@ -418,7 +482,7 @@ function slideEnd(){
   if(shouldBeDone){
     thumb.style.right = 'calc(100% - 43px)'; fill.style.width = '100%';
     label.textContent = 'تمت اليوم ✓ — اسحب للإلغاء'; label.classList.add('on-fill'); track.classList.add('done');
-    if(!wasDone){ habit.entries[today] = true; playChime(); }
+    if(!wasDone){ habit.entries[today] = true; playChime(); checkMilestone(habit); }
   } else {
     thumb.style.right = '3px'; fill.style.width = '0%';
     label.textContent = 'اسحب لليمين لتأكيد اليوم →'; label.classList.remove('on-fill'); track.classList.remove('done');
@@ -460,7 +524,7 @@ function renderHabitsView(){
               <div class="habit-name">${escapeHtml(habit.name)}</div>
             </div>
             <div class="stats">
-              <div class="stat"><div class="num mono">${s.current}🔥</div><div class="lbl">الحالي</div></div>
+              <div class="stat"><div class="num mono">${s.current}🔥${milestoneBadge(s.current)?' '+milestoneBadge(s.current):''}</div><div class="lbl">الحالي</div></div>
               <div class="stat"><div class="num mono">${pct}%</div><div class="lbl">النسبة</div></div>
               <div class="stat"><div class="num mono">${s.best}</div><div class="lbl">الأفضل</div></div>
               <button class="del-btn ${isConfirming?'confirm':''}" onclick="deleteHabit('${habit.id}')">${isConfirming?'تأكيد الحذف؟':'✕'}</button>
@@ -531,7 +595,7 @@ function renderHistoryView(){
             <div class="habit-name">${escapeHtml(habit.name)}</div>
           </div>
           <div class="stats">
-            <div class="stat"><div class="num mono">${s.current}🔥</div><div class="lbl">الحالي</div></div>
+            <div class="stat"><div class="num mono">${s.current}🔥${milestoneBadge(s.current)?' '+milestoneBadge(s.current):''}</div><div class="lbl">الحالي</div></div>
             <div class="stat"><div class="num mono">${pct}%</div><div class="lbl">النسبة</div></div>
             <div class="stat"><div class="num mono">${s.total}</div><div class="lbl">الإجمالي</div></div>
           </div>
@@ -547,7 +611,17 @@ window.changeHistYear = function(dir){ histYear += dir; render(); };
 // ---------- Dashboard ----------
 function renderDashboard(){
   if(state.habits.length===0){
-    return `<div class="empty-state"><div class="big">◎</div>أضف عادات لترى إحصائياتك هنا</div>`;
+    return `<div class="empty-state"><div class="big">◎</div>أضف عادات لترى إحصائياتك هنا</div>
+    <div class="hist-card">
+      <div class="habit-name" style="margin-bottom:10px;">النسخ الاحتياطي</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <button class="btn sm" onclick="exportBackup()">⬇ تنزيل نسخة احتياطية</button>
+        <label class="btn ghost sm" style="cursor:pointer;">
+          ⬆ استيراد نسخة احتياطية
+          <input type="file" accept="application/json" style="display:none;" onchange="importBackup(this.files[0])">
+        </label>
+      </div>
+    </div>`;
   }
   const today = todayStr();
   const doneToday = state.habits.filter(h=>h.entries[today]).length;
@@ -605,6 +679,10 @@ function renderDashboard(){
       <div class="dash-tile"><div class="big-num mono">${state.habits.length}</div><div class="lbl">عدد العادات</div></div>
     </div>
     <div class="hist-card">
+      <div class="habit-name" style="margin-bottom:10px;">الاتجاه العام (آخر 10 أسابيع)</div>
+      ${renderTrendChart()}
+    </div>
+    <div class="hist-card">
       <div class="habit-name" style="margin-bottom:10px;">نسبة الالتزام لكل عادة</div>
       ${barsHtml}
     </div>
@@ -612,11 +690,315 @@ function renderDashboard(){
       <div class="habit-name" style="margin-bottom:4px;">آخر 7 أيام</div>
       ${matrixHtml}
     </div>
+    <div class="hist-card">
+      <div class="habit-name" style="margin-bottom:10px;">النسخ الاحتياطي</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <button class="btn sm" onclick="exportBackup()">⬇ تنزيل نسخة احتياطية</button>
+        <label class="btn ghost sm" style="cursor:pointer;">
+          ⬆ استيراد نسخة احتياطية
+          <input type="file" accept="application/json" style="display:none;" onchange="importBackup(this.files[0])">
+        </label>
+      </div>
+      <div class="save-hint" style="margin-top:8px;">يحفظ كل عاداتك وتدويناتك وكتبك بملف واحد على جهازك — احتفظ به بمكان آمن.</div>
+    </div>
   `;
 }
 
+// ---------- Trend chart ----------
+function computeWeeklyTrend(weeksCount){
+  const points = [];
+  for(let i=weeksCount-1; i>=0; i--){
+    const windowEnd = new Date(); windowEnd.setDate(windowEnd.getDate() - i*7);
+    const days = [];
+    for(let d=6; d>=0; d--){ const dt = new Date(windowEnd); dt.setDate(dt.getDate()-d); days.push(fmtDate(dt)); }
+    const doneCount = state.habits.reduce((acc,h)=> acc + days.filter(ds=>h.entries[ds]).length, 0);
+    const total = Math.max(1, state.habits.length*7);
+    const pct = Math.round((doneCount/total)*100);
+    points.push({ label: windowEnd, pct });
+  }
+  return points;
+}
+function renderTrendChart(){
+  const points = computeWeeklyTrend(10);
+  const w = 640, h = 160, padL = 32, padR = 10, padT = 14, padB = 24;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const stepX = points.length>1 ? plotW/(points.length-1) : 0;
+  const coords = points.map((p,i)=>({
+    x: padL + i*stepX,
+    y: padT + plotH - (p.pct/100)*plotH,
+    pct: p.pct, label: p.label
+  }));
+  const linePath = coords.map((c,i)=> (i===0?'M':'L') + c.x.toFixed(1) + ',' + c.y.toFixed(1)).join(' ');
+  const areaPath = linePath + ` L${coords[coords.length-1].x.toFixed(1)},${(padT+plotH).toFixed(1)} L${coords[0].x.toFixed(1)},${(padT+plotH).toFixed(1)} Z`;
+  const gridLines = [0,25,50,75,100].map(v=>{
+    const y = padT + plotH - (v/100)*plotH;
+    return `<line x1="${padL}" y1="${y}" x2="${w-padR}" y2="${y}" stroke="var(--border)" stroke-width="1"/>
+            <text x="${padL-6}" y="${y+3}" font-size="9" fill="var(--text-faint)" text-anchor="end" font-family="JetBrains Mono, monospace">${v}</text>`;
+  }).join('');
+  const dots = coords.map(c=>`<circle cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" r="3" fill="var(--accent)"><title>${c.pct}%</title></circle>`).join('');
+  const labels = coords.map((c,i)=>{
+    if(i%2!==0 && i!==coords.length-1) return '';
+    const lbl = `${c.label.getDate()}/${c.label.getMonth()+1}`;
+    return `<text x="${c.x.toFixed(1)}" y="${h-4}" font-size="9" fill="var(--text-faint)" text-anchor="middle" font-family="JetBrains Mono, monospace">${lbl}</text>`;
+  }).join('');
+  return `
+    <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block;">
+      ${gridLines}
+      <path d="${areaPath}" fill="var(--accent)" opacity="0.08"/>
+      <path d="${linePath}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+      ${dots}
+      ${labels}
+    </svg>
+  `;
+}
+
+// ---------- Backup / Restore ----------
+window.exportBackup = function(){
+  const backup = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    habits: state.habits,
+    journal: state.journal,
+    books: state.books,
+    readingGoal: state.readingGoal,
+    theme
+  };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `ratm-backup-${todayStr()}.json`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=> URL.revokeObjectURL(url), 1000);
+  showToast('تم تنزيل النسخة الاحتياطية ✓');
+};
+
+window.importBackup = function(file){
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e)=>{
+    try{
+      const data = JSON.parse(e.target.result);
+      if(Array.isArray(data.habits)) state.habits = data.habits;
+      if(data.journal && typeof data.journal==='object') state.journal = data.journal;
+      if(Array.isArray(data.books)) state.books = data.books;
+      if(data.readingGoal) state.readingGoal = data.readingGoal;
+      if(data.theme) theme = data.theme;
+      await saveHabits(); await saveJournal(); await saveBooks(); await saveReadingGoal(); await saveTheme();
+      render();
+      showToast('تم استيراد النسخة الاحتياطية ✓');
+    }catch(err){
+      showToast('⚠ فشل الاستيراد — تأكد أن الملف صحيح');
+    }
+  };
+  reader.readAsText(file);
+};
+
+// ---------- Books ----------
+function renderReadingGoalCard(){
+  const year = new Date().getFullYear();
+  const goal = state.readingGoal && state.readingGoal.year===year ? state.readingGoal.target : null;
+  const completedThisYear = state.books.filter(b=> b.completedAt && b.completedAt.startsWith(String(year))).length;
+  if(!goal){
+    return `
+      <div class="hist-card">
+        <div class="habit-name" style="margin-bottom:10px;">🎯 هدف القراءة لعام ${year}</div>
+        <div class="add-row">
+          <input type="number" id="reading-goal-input" placeholder="كم كتاب تبي تقرأ هذي السنة؟" min="1" style="max-width:220px;">
+          <button class="btn sm" onclick="setReadingGoal()">حفظ الهدف</button>
+        </div>
+      </div>
+    `;
+  }
+  const pct = Math.min(100, Math.round((completedThisYear/goal)*100));
+  return `
+    <div class="hist-card">
+      <div class="habit-head" style="margin-bottom:10px;">
+        <div class="habit-name">🎯 هدف القراءة لعام ${year}</div>
+        <button class="btn ghost sm" onclick="editReadingGoal()">تعديل</button>
+      </div>
+      <div class="bar-row" style="border-bottom:none;padding:0;">
+        <div class="bar-name" style="width:auto;">${completedThisYear} / ${goal} كتاب</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%"></div></div>
+        <div class="bar-pct mono">${pct}%</div>
+      </div>
+    </div>
+  `;
+}
+window.setReadingGoal = function(){
+  const input = document.getElementById('reading-goal-input');
+  const target = parseInt(input.value)||0;
+  if(target<=0) return;
+  state.readingGoal = { year: new Date().getFullYear(), target };
+  saveReadingGoal(); render();
+};
+window.editReadingGoal = function(){
+  state.readingGoal = null;
+  render();
+};
+
+function renderBooksView(){
+  let html = renderReadingGoalCard();
+  html += `
+    <div class="add-card">
+      <div class="add-row">
+        <input type="text" id="new-book-title" placeholder="اسم الكتاب" style="flex:1.5;">
+        <input type="text" id="new-book-author" placeholder="المؤلف (اختياري)" style="flex:1;">
+        <input type="number" id="new-book-pages" placeholder="عدد الصفحات" min="1" style="width:120px;flex:none;">
+        <button class="btn" onclick="addBook()">+ إضافة كتاب</button>
+      </div>
+    </div>
+  `;
+  if(state.books.length===0){
+    html += `<div class="empty-state"><div class="big">▤</div>أضف أول كتاب تقرأه حاليًا أو تخطط له</div>`;
+    return html;
+  }
+  state.books.forEach(book=>{
+    const total = Math.max(1, parseInt(book.totalPages)||1);
+    const current = Math.min(total, Math.max(0, parseInt(book.currentPage)||0));
+    const pct = Math.round((current/total)*100);
+    const done = current>=total;
+    const isConfirming = confirmingDeleteBook===book.id;
+    const rating = book.rating||0;
+    const starsHtml = done ? `
+      <div style="margin:10px 0;">
+        ${[1,2,3,4,5].map(n=>`<span onclick="setBookRating('${book.id}', ${n})" style="cursor:pointer;font-size:20px;color:${n<=rating?'var(--accent)':'var(--border)'};">★</span>`).join('')}
+      </div>
+    ` : '';
+    html += `
+      <div class="book-card">
+        <div class="book-head">
+          <div class="book-title-wrap">
+            <div class="book-title">${escapeHtml(book.title)}</div>
+            ${book.author ? `<div class="book-author">${escapeHtml(book.author)}</div>` : ''}
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div class="book-status ${done?'done':''}">${done?'مكتمل ✓':(current===0?'لم يبدأ':'قيد القراءة')}</div>
+            <button class="del-btn ${isConfirming?'confirm':''}" onclick="deleteBook('${book.id}')">${isConfirming?'تأكيد الحذف؟':'✕'}</button>
+          </div>
+        </div>
+        <div class="book-progress-row">
+          <div class="book-pages-input">
+            <input type="number" min="0" max="${total}" value="${current}" onchange="updateBookPage('${book.id}', this.value)">
+            <span class="book-pages-sep">/ ${total}</span>
+          </div>
+          <div class="book-bar-track"><div class="book-bar-fill" style="width:${pct}%"></div></div>
+          <div class="book-pct mono">${pct}%</div>
+        </div>
+        ${starsHtml}
+        <div class="book-notes-label">ملاحظاتي عن الكتاب</div>
+        <textarea class="book-notes" id="book-notes-${book.id}" placeholder="اكتب أفكارك، اقتباسات، أو ملخصًا…" oninput="onBookNotesInput('${book.id}', this.value)">${escapeHtml(book.notes||'')}</textarea>
+        <div class="book-meta-row">
+          <div class="book-save-hint" id="book-save-hint-${book.id}">يُحفظ تلقائيًا</div>
+        </div>
+      </div>
+    `;
+  });
+  return html;
+}
+
+window.addBook = function(){
+  const titleInput = document.getElementById('new-book-title');
+  const authorInput = document.getElementById('new-book-author');
+  const pagesInput = document.getElementById('new-book-pages');
+  const title = titleInput.value.trim();
+  const author = authorInput.value.trim();
+  const totalPages = parseInt(pagesInput.value) || 0;
+  if(!title || totalPages<=0) return;
+  state.books.push({ id: uid(), title, author, totalPages, currentPage: 0, notes: '', createdAt: todayStr() });
+  saveBooks(); render();
+};
+
+let confirmingDeleteBook = null;
+window.deleteBook = function(id){
+  if(confirmingDeleteBook===id){
+    state.books = state.books.filter(b=>b.id!==id);
+    confirmingDeleteBook=null;
+    saveBooks();
+  } else {
+    confirmingDeleteBook = id;
+    setTimeout(()=>{ if(confirmingDeleteBook===id){ confirmingDeleteBook=null; render(); } }, 3000);
+  }
+  render();
+};
+
+window.updateBookPage = function(id, value){
+  const book = state.books.find(b=>b.id===id);
+  if(!book) return;
+  const total = Math.max(1, parseInt(book.totalPages)||1);
+  let v = parseInt(value) || 0;
+  v = Math.max(0, Math.min(total, v));
+  const wasDone = (parseInt(book.currentPage)||0) >= total;
+  book.currentPage = v;
+  const isDone = v >= total;
+  if(isDone && !wasDone){
+    book.completedAt = todayStr();
+    showToast(`🎉 أنهيت كتاب «${book.title}»!`);
+  } else if(!isDone && wasDone){
+    delete book.completedAt;
+  }
+  saveBooks(); render();
+};
+
+window.setBookRating = function(id, rating){
+  const book = state.books.find(b=>b.id===id);
+  if(!book) return;
+  book.rating = book.rating===rating ? 0 : rating;
+  saveBooks(); render();
+};
+
+let bookNotesSaveTimeout = {};
+window.onBookNotesInput = function(id, val){
+  const book = state.books.find(b=>b.id===id);
+  if(!book) return;
+  book.notes = val;
+  const hint = document.getElementById('book-save-hint-'+id);
+  if(hint) hint.textContent = 'جارٍ الحفظ…';
+  clearTimeout(bookNotesSaveTimeout[id]);
+  bookNotesSaveTimeout[id] = setTimeout(async ()=>{
+    await saveBooks();
+    const h = document.getElementById('book-save-hint-'+id);
+    if(h) h.textContent = 'تم الحفظ ✓';
+  }, 500);
+};
+
 // ---------- Journal ----------
+let journalSearchQuery = '';
 function renderJournalView(){
+  const searchBar = `
+    <div class="add-card">
+      <div class="add-row">
+        <input type="text" id="journal-search" placeholder="ابحث في تدويناتك…" value="${escapeHtml(journalSearchQuery)}" oninput="onJournalSearch(this.value)">
+        ${journalSearchQuery ? `<button class="btn ghost sm" onclick="clearJournalSearch()">✕ مسح البحث</button>` : ''}
+      </div>
+    </div>
+  `;
+
+  if(journalSearchQuery.trim()){
+    const q = journalSearchQuery.trim().toLowerCase();
+    const matches = Object.keys(state.journal)
+      .filter(d => state.journal[d] && state.journal[d].toLowerCase().includes(q))
+      .sort().reverse();
+    let resultsHtml = '';
+    if(matches.length===0){
+      resultsHtml = `<div class="empty-state"><div class="big">🔍</div>لا توجد نتائج مطابقة لـ"${escapeHtml(journalSearchQuery)}"</div>`;
+    } else {
+      resultsHtml = matches.map(d=>{
+        const text = state.journal[d];
+        const idx = text.toLowerCase().indexOf(q);
+        const start = Math.max(0, idx-40);
+        const snippet = (start>0?'…':'') + text.slice(start, idx+q.length+60) + (idx+q.length+60<text.length?'…':'');
+        const [y,m,dd] = d.split('-');
+        return `
+          <div class="hist-card" style="cursor:pointer;" onclick="jumpToJournalDate('${d}')">
+            <div class="habit-name mono" style="margin-bottom:6px;font-size:14px;">${dd}/${m}/${y}</div>
+            <div style="font-size:13.5px;color:var(--text-dim);line-height:1.7;">${escapeHtml(snippet)}</div>
+          </div>
+        `;
+      }).join('');
+    }
+    return searchBar + resultsHtml;
+  }
+
   const first = new Date(calYear, calMonth, 1);
   const startDow = first.getDay();
   const daysInMonth = new Date(calYear, calMonth+1, 0).getDate();
@@ -632,7 +1014,7 @@ function renderJournalView(){
   const monthName = new Date(calYear, calMonth, 1).toLocaleDateString('ar-SA-u-nu-latn',{month:'long', year:'numeric'});
   const entryText = state.journal[selectedDate] || '';
   const [sy,sm,sd] = selectedDate.split('-');
-  return `
+  return searchBar + `
     <div class="journal-layout">
       <div class="cal-card">
         <div class="cal-nav">
@@ -656,6 +1038,20 @@ function renderJournalView(){
     </div>
   `;
 }
+window.onJournalSearch = function(val){
+  journalSearchQuery = val;
+  render();
+  const el = document.getElementById('journal-search');
+  if(el){ el.focus(); el.setSelectionRange(val.length, val.length); }
+};
+window.clearJournalSearch = function(){ journalSearchQuery = ''; render(); };
+window.jumpToJournalDate = function(d){
+  journalSearchQuery = '';
+  selectedDate = d;
+  const [y,m] = d.split('-');
+  calYear = parseInt(y); calMonth = parseInt(m)-1;
+  render();
+};
 window.changeMonth = function(dir){
   calMonth += dir;
   if(calMonth<0){ calMonth=11; calYear--; }
@@ -692,13 +1088,14 @@ function render(){
   if(activeTab==='habits') viewHtml = renderHabitsView();
   else if(activeTab==='dashboard') viewHtml = renderDashboard();
   else if(activeTab==='history') viewHtml = renderHistoryView();
+  else if(activeTab==='books') viewHtml = renderBooksView();
   else viewHtml = renderJournalView();
 
   app.innerHTML = `
     <div class="hero">
       <div>
-        <h1>رتم</h1>
-        <div class="sub">تتبّع عاداتك اليومية ودوّن لحظاتك</div>
+        <h1>Rhythm</h1>
+        <div class="sub">تتبّع عاداتك اليومية وغير حياتك </div>
       </div>
       <div class="hero-right">
         <div class="today-badge mono">${new Date().toLocaleDateString('ar-SA',{weekday:'long', day:'numeric', month:'long'})}</div>
@@ -709,6 +1106,7 @@ function render(){
       <div class="tab ${activeTab==='habits'?'active':''}" onclick="setTab('habits')">العادات</div>
       <div class="tab ${activeTab==='dashboard'?'active':''}" onclick="setTab('dashboard')">لوحة التحكم</div>
       <div class="tab ${activeTab==='history'?'active':''}" onclick="setTab('history')">السجل</div>
+      <div class="tab ${activeTab==='books'?'active':''}" onclick="setTab('books')">الكتب</div>
       <div class="tab ${activeTab==='journal'?'active':''}" onclick="setTab('journal')">التدوين</div>
     </div>
     <div class="view active">${viewHtml}</div>
