@@ -270,6 +270,135 @@ const storage = {
   }
 };
 
+// ---------- Cloud sync (Firebase) — local IndexedDB stays the source for offline use ----------
+const firebaseConfig = {
+  apiKey: "AIzaSyB45tXPoTv0mNQgKA789TrjUiLbgAOwAbg",
+  authDomain: "rhythm-9fd0b.firebaseapp.com",
+  projectId: "rhythm-9fd0b",
+  storageBucket: "rhythm-9fd0b.firebasestorage.app",
+  messagingSenderId: "536825831553",
+  appId: "1:536825831553:web:f65b39f2fe0d4346a6ed80"
+};
+const SYNC_KEYS = ['ratm-habits','ratm-journal','ratm-books','ratm-reading-goal','ratm-theme','ratm-sound'];
+const FB_V = '10.12.2';
+let justSignedIn = false;
+const cloud = { fb:null, auth:null, db:null, user:null, status:'off', meta:{}, unsub:null };
+const localSet = storage.set.bind(storage);
+storage.set = async function(key, value){
+  const r = await localSet(key, value);
+  if(cloud.user && SYNC_KEYS.includes(key)) pushKey(key, value);
+  return r;
+};
+async function loadMeta(){ try{ const m = await storage.get('ratm-sync-meta'); cloud.meta = (m && m.value) ? JSON.parse(m.value) : {}; }catch(e){ cloud.meta = {}; } }
+function saveMeta(){ return localSet('ratm-sync-meta', JSON.stringify(cloud.meta)); }
+async function pushKey(key, value){
+  const ts = Date.now();
+  cloud.meta[key] = ts; saveMeta();
+  try{
+    const { doc, setDoc } = cloud.fb;
+    await setDoc(doc(cloud.db, 'users', cloud.user.uid, 'kv', key), { value: String(value), updatedAt: ts });
+  }catch(e){ console.error('sync push', e); setCloudStatus('error'); }
+}
+function setCloudStatus(st){ cloud.status = st; const b = document.getElementById('cloud-btn'); if(b){ b.textContent = cloudIcon(); b.title = cloudTitle(); } }
+function cloudIcon(){ return {off:'☁', loading:'…', on:'☁✓', error:'☁!'}[cloud.status] || '☁'; }
+function cloudTitle(){
+  if(cloud.status==='on' && cloud.user) return 'المزامنة مفعّلة: ' + (cloud.user.email||'') + ' — اضغط لتسجيل الخروج';
+  if(cloud.status==='error') return 'تعذّرت المزامنة — اضغط لإعادة المحاولة';
+  return 'تسجيل الدخول بجوجل لتفعيل المزامنة السحابية';
+}
+async function loadFirebase(){
+  if(cloud.fb) return cloud.fb;
+  const base = `https://www.gstatic.com/firebasejs/${FB_V}/`;
+  const [app, auth, fs] = await Promise.all([
+    import(base+'firebase-app.js'), import(base+'firebase-auth.js'), import(base+'firebase-firestore.js')
+  ]);
+  const a = app.initializeApp(firebaseConfig);
+  cloud.auth = auth.getAuth(a);
+  try{ await auth.setPersistence(cloud.auth, auth.browserLocalPersistence); }catch(e){}
+  cloud.db = fs.getFirestore(a);
+  cloud.fb = { ...auth, ...fs };
+  return cloud.fb;
+}
+async function reloadFromLocal(){ await loadState(); render(); }
+async function startSync(user){
+  cloud.user = user; setCloudStatus('loading');
+  await loadMeta();
+  const { collection, getDocs, onSnapshot } = cloud.fb;
+  const col = collection(cloud.db, 'users', user.uid, 'kv');
+  try{
+    const snap = await getDocs(col);
+    const remote = {}; snap.forEach(d=> remote[d.id] = d.data());
+    let changed = false;
+    const firstSyncHere = Object.keys(cloud.meta).length===0;
+    const localHasData = state.habits.some(h=>Object.keys(h.entries||{}).length) || Object.keys(state.journal||{}).length || (state.books||[]).length;
+    if(firstSyncHere && localHasData && Object.keys(remote).length){
+      const keepLocal = confirm('فيه بيانات محفوظة في السحابة وبيانات على هذا الجهاز.\n\nموافق = اعتماد بيانات هذا الجهاز ورفعها للسحابة\nإلغاء = اعتماد بيانات السحابة على هذا الجهاز');
+      const now = Date.now();
+      for(const key of SYNC_KEYS){
+        if(keepLocal){ const l = await storage.get(key); if(l && l.value != null) await pushKey(key, l.value); }
+        else if(remote[key]){ await localSet(key, remote[key].value); cloud.meta[key] = remote[key].updatedAt; changed = true; }
+      }
+    }
+    else for(const key of SYNC_KEYS){
+      const r = remote[key], localTs = cloud.meta[key] || 0;
+      if(r && r.updatedAt > localTs){
+        await localSet(key, r.value); cloud.meta[key] = r.updatedAt; changed = true;
+      } else {
+        const l = await storage.get(key);
+        if(l && l.value !== undefined && l.value !== null && (!r || localTs > r.updatedAt)) await pushKey(key, l.value);
+      }
+    }
+    await saveMeta();
+    if(changed) await reloadFromLocal();
+    if(cloud.unsub) cloud.unsub();
+    cloud.unsub = onSnapshot(col, async (qs)=>{
+      if(qs.metadata.hasPendingWrites) return;
+      let ch = false;
+      for(const c of qs.docChanges()){
+        if(c.type==='removed') continue;
+        const d = c.doc.data(), key = c.doc.id;
+        if(SYNC_KEYS.includes(key) && d.updatedAt > (cloud.meta[key]||0)){
+          await localSet(key, d.value); cloud.meta[key] = d.updatedAt; ch = true;
+        }
+      }
+      if(ch){ await saveMeta(); await reloadFromLocal(); }
+    }, (e)=>{ console.error('sync listen', e); setCloudStatus('error'); });
+    setCloudStatus('on');
+  }catch(e){ console.error('sync start', e); setCloudStatus('error'); }
+}
+window.cloudAction = async function(){
+  try{
+    if(cloud.status==='on' && cloud.user){
+      if(!confirm('تسجيل الخروج من المزامنة؟ بياناتك تبقى محفوظة على هذا الجهاز.')) return;
+      if(cloud.unsub) cloud.unsub(); cloud.unsub = null;
+      await cloud.fb.signOut(cloud.auth); cloud.user = null; setCloudStatus('off');
+      showToast('تم تسجيل الخروج'); return;
+    }
+    setCloudStatus('loading');
+    const fb = await loadFirebase();
+    const provider = new fb.GoogleAuthProvider();
+    justSignedIn = true;
+    try{ await fb.signInWithPopup(cloud.auth, provider); }
+    catch(e){
+      if(e && (e.code==='auth/popup-blocked' || e.code==='auth/operation-not-supported-in-this-environment')) await fb.signInWithRedirect(cloud.auth, provider);
+      else throw e;
+    }
+  }catch(e){
+    console.error('sign-in', e); setCloudStatus(cloud.user ? 'on' : 'off');
+    if(!(e && e.code==='auth/popup-closed-by-user')) showToast('تعذّر تسجيل الدخول: ' + ((e && e.code) || 'خطأ'));
+  }
+};
+async function initCloud(){
+  try{
+    const fb = await loadFirebase();
+    try{ await fb.getRedirectResult(cloud.auth); }catch(e){}
+    fb.onAuthStateChanged(cloud.auth, (user)=>{
+      if(user && (!cloud.user || cloud.user.uid !== user.uid)){ startSync(user); if(justSignedIn){ justSignedIn=false; showToast('تم تفعيل المزامنة ✓'); } }
+      else if(!user){ cloud.user = null; setCloudStatus('off'); }
+    });
+  }catch(e){ console.warn('cloud unavailable (offline?)', e); }
+}
+
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
     navigator.serviceWorker.register('./sw.js').catch(()=>{});
@@ -1126,6 +1255,7 @@ function render(){
       </div>
       <div class="hero-right">
         <div class="today-badge mono">${new Date().toLocaleDateString('ar-SA',{weekday:'long', day:'numeric', month:'long'})}</div>
+        <div class="theme-btn" id="cloud-btn" onclick="cloudAction()" title="${cloudTitle()}" style="width:auto;min-width:38px;padding:0 10px;border-radius:19px;font-size:14px;">${cloudIcon()}</div>
         <div class="theme-btn" onclick="cycleSound()" title="صوت الإنجاز: ${SOUNDS.find(x=>x.id===soundId).label} — اضغط للتغيير">${SOUNDS.find(x=>x.id===soundId).icon}</div>
         <div class="theme-btn" onclick="toggleTheme()" title="تبديل النمط">${theme==='dark'?'☀':'☾'}</div>
       </div>
@@ -1142,7 +1272,7 @@ function render(){
 }
 window.setTab = function(t){ activeTab=t; render(); };
 
-(async function init(){ await loadState(); render(); })();
+(async function init(){ await loadState(); render(); initCloud(); })();
 </script>
 </body>
 </html>
