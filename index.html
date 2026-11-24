@@ -201,6 +201,37 @@
   .book-meta-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}
   .book-save-hint{font-size:11px;color:var(--text-faint);}
 
+  .habit-meta{font-size:11.5px;color:var(--text-faint);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .habit-card.rest{opacity:.6;}
+  .habit-tools{display:flex;gap:8px;margin-top:10px;justify-content:flex-start;}
+  .tool-btn{background:none;border:1px solid var(--border);color:var(--text-dim);font-family:inherit;font-size:11.5px;padding:4px 10px;border-radius:14px;cursor:pointer;}
+  .tool-btn:hover{color:var(--text);border-color:var(--text);}
+  .excused-bar{height:46px;border-radius:23px;border:1px dashed var(--text-dim);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-dim);cursor:pointer;background:repeating-linear-gradient(45deg,transparent 0 8px,var(--surface-2) 8px 16px);}
+  .counter{position:relative;display:flex;align-items:center;justify-content:space-between;height:46px;border-radius:23px;background:var(--surface-2);border:1px solid var(--border);overflow:hidden;}
+  .counter-fill{position:absolute;top:0;bottom:0;right:0;background:var(--accent);opacity:.18;transition:width .3s;}
+  .counter.done .counter-fill{opacity:1;}
+  .counter.done .cval,.counter.done .cbtn{color:var(--accent-contrast);}
+  .cbtn{position:relative;z-index:1;width:46px;height:46px;border:none;background:none;color:var(--text);font-size:22px;cursor:pointer;font-family:inherit;}
+  .cval{position:relative;z-index:1;font-size:15px;font-weight:700;cursor:pointer;}
+  .cunit{font-family:'Cairo',sans-serif;font-weight:400;font-size:12px;}
+  .habit-settings{margin-top:12px;padding-top:12px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px;}
+  .habit-settings label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-dim);flex:1;}
+  .habit-settings input[type=text],.habit-settings input[type=number],.habit-settings select{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:var(--radius-sm);font-family:inherit;font-size:14px;outline:none;}
+  .hs-row{display:flex;gap:10px;flex-wrap:wrap;}
+  .hs-days{display:flex;gap:6px;flex-wrap:wrap;}
+  .habit-settings label.daychip{flex:none;flex-direction:row;align-items:center;gap:0;}
+  .daychip input{display:none;}
+  .daychip span{padding:6px 10px;border:1px solid var(--border);border-radius:14px;font-size:12px;cursor:pointer;color:var(--text-dim);}
+  .daychip input:checked + span{background:var(--accent);color:var(--accent-contrast);border-color:var(--accent);}
+  .hs-actions{display:flex;gap:8px;}
+  .day-cell.excused,.wm-cell.excused{background:repeating-linear-gradient(45deg,var(--track) 0 2px,var(--text-faint) 2px 3px) !important;}
+  .day-cell.off,.wm-cell.off{opacity:.35;}
+  .day-cell[data-part="1"],.wm-cell[data-part="1"]{background:color-mix(in srgb, var(--accent) calc(var(--p) * 100%), var(--track));}
+  .today-badge{display:flex;flex-direction:column;align-items:center;line-height:1.35;border-radius:14px !important;}
+  .today-badge .hijri{font-family:'Cairo',sans-serif;font-size:11px;color:var(--text-dim);}
+  .hijri-sub{font-size:11.5px;font-weight:400;color:var(--text-dim);display:block;}
+  .cal-day .hday{font-size:8.5px;color:var(--text-faint);line-height:1;margin-top:1px;}
+  .cal-day.selected .hday{color:var(--accent-contrast);opacity:.7;}
   @media (max-width:600px){
     .hero h1{font-size:28px;}
     .stats{gap:10px;}
@@ -481,29 +512,105 @@ window.cycleSound = function(){
   saveSound(); playChime(); render();
 };
 
-function computeStreaks(habit){
-  const entries = habit.entries || {};
-  const dates = Object.keys(entries).filter(d=>entries[d]).sort();
-  if(dates.length===0) return {current:0, best:0, total:0};
-  const set = new Set(dates);
-  let cur = 0;
-  let cursor = new Date();
-  if(!set.has(fmtDate(cursor))) cursor.setDate(cursor.getDate()-1);
-  while(set.has(fmtDate(cursor))){ cur++; cursor.setDate(cursor.getDate()-1); }
-  let best=0, run=0, prev=null;
-  for(const d of dates){
-    if(prev){ const diff = daysBetween(prev,d); run = diff===1 ? run+1 : 1; } else run = 1;
-    best = Math.max(best, run); prev = d;
+// ---------- Habit model: types (check/count), schedules, excused days ----------
+const DOW_FULL = ['الأحد','الاثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت'];
+function parseD(s){ const [y,m,d]=s.split('-').map(Number); return new Date(y,m-1,d); }
+function addDays(s,n){ const d=parseD(s); d.setDate(d.getDate()+n); return fmtDate(d); }
+function weekStart(s){ const d=parseD(s); d.setDate(d.getDate()-((d.getDay()+1)%7)); return fmtDate(d); } // week starts Saturday
+function hType(h){ return h.type==='count' ? 'count' : 'check'; }
+function hSched(h){ return h.schedule || {type:'daily'}; }
+function isWeekly(h){ return hSched(h).type==='weekly'; }
+function weeklyTarget(h){ return Math.max(1, Math.min(7, parseInt(hSched(h).times)||3)); }
+function hTarget(h){ return Math.max(1, Number(h.target)||1); }
+function startOf(h){ return h.createdAt || todayStr(); }
+function entryVal(h,d){ const v=(h.entries||{})[d]; if(v===true) return hType(h)==='count' ? hTarget(h) : 1; return typeof v==='number' ? v : 0; }
+function isDone(h,d){ const v=(h.entries||{})[d]; if(v===undefined||v===null||v===false) return false; if(hType(h)==='check') return !!v; return v===true || v>=hTarget(h); }
+function progressOf(h,d){ return hType(h)==='check' ? (isDone(h,d)?1:0) : Math.min(1, entryVal(h,d)/hTarget(h)); }
+function isExcused(h,d){ return !!(h.excused && h.excused[d]); }
+function isScheduled(h,d){ const s=hSched(h); return s.type==='days' ? (s.days||[]).includes(parseD(d).getDay()) : true; }
+function fmtNum(n){ return Number.isInteger(n) ? String(n) : String(Math.round(n*10)/10); }
+function weekInfo(h, ws){
+  const today=todayStr(), from=startOf(h);
+  let done=0, exc=0, avail=0;
+  for(let i=0;i<7;i++){
+    const d=addDays(ws,i);
+    if(isDone(h,d)) done++;
+    if(d<from || d>today) continue;
+    if(isExcused(h,d)) exc++; else avail++;
   }
-  return {current:cur, best, total:dates.length};
+  let req = Math.max(0, weeklyTarget(h)-exc);
+  if(ws < from) req = Math.min(req, avail);           // first, partial week
+  const isCurrent = addDays(ws,6) >= today;
+  return { done, req, met: req>0 && done>=req, neutral: req===0, isCurrent };
 }
-
-function computePercentage(habit){
-  const total = Object.keys(habit.entries||{}).filter(d=>habit.entries[d]).length;
-  const start = habit.createdAt || todayStr();
-  const elapsed = Math.max(1, daysBetween(start, todayStr())+1);
-  return Math.min(100, Math.round((total/elapsed)*100));
+function scheduleText(h){
+  const s=hSched(h);
+  if(s.type==='weekly') return `${weeklyTarget(h)} مرات بالأسبوع`;
+  if(s.type==='days') return (s.days||[]).slice().sort().map(i=>DOW_FULL[i]).join('، ') || 'بدون أيام';
+  return 'يومياً';
 }
+function computeStreaks(h){
+  const today=todayStr();
+  const keys=Object.keys(h.entries||{}).sort();
+  const from = keys[0] && keys[0]<startOf(h) ? keys[0] : startOf(h);
+  const total = keys.filter(d=>isDone(h,d)).length;
+  if(isWeekly(h)){
+    const weeks=[]; for(let ws=weekStart(from); ws<=today; ws=addDays(ws,7)) weeks.push(weekInfo(h,ws));
+    let best=0, run=0;
+    weeks.forEach(w=>{ if(w.neutral) return; if(w.met){ run++; best=Math.max(best,run); } else if(!w.isCurrent) run=0; });
+    let cur=0;
+    for(let i=weeks.length-1;i>=0;i--){ const w=weeks[i]; if(w.neutral) continue; if(w.met) cur++; else if(w.isCurrent) continue; else break; }
+    return {current:cur, best, total, unit:'week'};
+  }
+  let best=0, run=0;
+  for(let d=from; d<=today; d=addDays(d,1)){
+    if(!isScheduled(h,d) || isExcused(h,d)) continue;
+    if(isDone(h,d)){ run++; best=Math.max(best,run); } else if(d!==today) run=0;
+  }
+  let cur=0;
+  for(let d=today; d>=from; d=addDays(d,-1)){
+    if(!isScheduled(h,d) || isExcused(h,d)) continue;
+    if(isDone(h,d)) cur++; else if(d===today) continue; else break;
+  }
+  return {current:cur, best, total, unit:'day'};
+}
+function computePercentage(h){
+  const today=todayStr(), start=startOf(h);
+  let got=0, need=0;
+  if(isWeekly(h)){
+    for(let ws=weekStart(start); ws<=today; ws=addDays(ws,7)){
+      const w=weekInfo(h,ws); if(w.neutral) continue;
+      if(w.isCurrent && !w.met){ got+=w.done; need+=w.done; continue; }
+      got+=Math.min(w.done,w.req); need+=w.req;
+    }
+  } else {
+    for(let d=start; d<=today; d=addDays(d,1)){
+      if(!isScheduled(h,d) || isExcused(h,d)) continue;
+      const p=progressOf(h,d);
+      if(d===today && p<1) continue;      // today isn't over yet
+      got+=p; need++;
+    }
+  }
+  return need ? Math.min(100, Math.round(got/need*100)) : 0;
+}
+// share of what was expected across a set of days (used by dashboard & trend)
+function windowPct(days){
+  const today=todayStr(); let got=0, need=0;
+  state.habits.forEach(h=>{
+    let g=0, n=0;
+    days.forEach(d=>{
+      if(d<startOf(h) || d>today || isExcused(h,d)) return;
+      if(isWeekly(h)){ n+=weeklyTarget(h)/7; if(isDone(h,d)) g++; return; }
+      if(!isScheduled(h,d)) return;
+      const p=progressOf(h,d);
+      if(d===today && p<1) return;
+      g+=p; n++;
+    });
+    got+=Math.min(g,n); need+=n;
+  });
+  return need ? Math.round(got/need*100) : null;
+}
+function streakUnitLabel(s){ return s.unit==='week' ? 'أسابيع' : 'الحالي'; }
 
 const MILESTONES = [7, 30, 100];
 function milestoneBadge(streak){
@@ -526,10 +633,12 @@ function showToast(msg){
 function checkMilestone(habit){
   const s = computeStreaks(habit);
   habit.celebrated = habit.celebrated || [];
-  MILESTONES.forEach(m=>{
-    if(s.current>=m && !habit.celebrated.includes(m)){
-      habit.celebrated.push(m);
-      showToast(`🎉 ${m} يوم متتالي في «${habit.name}»!`);
+  const list = s.unit==='week' ? [4,12,52] : MILESTONES;
+  list.forEach(m=>{
+    const tag = s.unit==='week' ? 'w'+m : m;
+    if(s.current>=m && !habit.celebrated.includes(tag)){
+      habit.celebrated.push(tag);
+      showToast(`🎉 ${m} ${s.unit==='week'?'أسبوع':'يوم'} متتالي في «${habit.name}»!`);
     }
   });
 }
@@ -563,24 +672,42 @@ function renderHeatmap(habit, year){
     let colHtml = '<div class="week-col">';
     week.forEach(d=>{
       if(!d){ colHtml += `<div class="day-cell" style="visibility:hidden"></div>`; return; }
-      const filled = !!habit.entries[d];
+      const filled = isDone(habit,d);
+      const exc = isExcused(habit,d);
+      const part = !filled && hType(habit)==='count' ? progressOf(habit,d) : 0;
+      const off = !isWeekly(habit) && !isScheduled(habit,d);
       const isFuture = d > today;
       const isToday = d === today;
-      colHtml += `<div class="day-cell ${filled?'filled':''} ${isFuture?'future':''} ${isToday?'today':''}"
-        title="${d}" data-habit="${habit.id}" data-date="${d}" ${isFuture?'':'onclick="toggleEntry(this)"'}></div>`;
+      const tip = d + (exc?' · معذور':'') + (hType(habit)==='count'&&entryVal(habit,d)?' · '+fmtNum(entryVal(habit,d))+' '+(habit.unit||''):'');
+      colHtml += `<div class="day-cell ${filled?'filled':''} ${exc?'excused':''} ${off?'off':''} ${isFuture?'future':''} ${isToday?'today':''}"
+        ${part>0?`style="--p:${(0.2+part*0.6).toFixed(2)}"`:''} data-part="${part>0?1:0}"
+        title="${tip}" data-habit="${habit.id}" data-date="${d}" ${isFuture?'':'onclick="toggleEntry(this)"'}></div>`;
     });
     colHtml += '</div>'; gridHtml += colHtml;
   });
   return `<div class="month-labels">${monthLabelsHtml}</div><div class="heatmap-scroll"><div class="heatmap">${gridHtml}</div></div>`;
 }
 
+function setExcused(h,d,on){ h.excused = h.excused || {}; if(on){ h.excused[d]=true; delete h.entries[d]; } else delete h.excused[d]; }
 window.toggleEntry = function(el){
   const id = el.getAttribute('data-habit'); const date = el.getAttribute('data-date');
   const habit = state.habits.find(h=>h.id===id); if(!habit) return;
-  const wasOn = !!habit.entries[date];
-  habit.entries[date] = !wasOn;
-  if(!habit.entries[date]) delete habit.entries[date];
-  if(!wasOn && date===todayStr()){ playChime(); checkMilestone(habit); }
+  const wasDone = isDone(habit,date);
+  if(hType(habit)==='count'){
+    const cur = isExcused(habit,date) ? 'ع' : (entryVal(habit,date) ? fmtNum(entryVal(habit,date)) : '');
+    const v = prompt(`«${habit.name}» يوم ${date}\nاكتب الرقم (الهدف ${fmtNum(hTarget(habit))} ${habit.unit||''})، أو ع = معذور، أو اتركه فاضي للمسح:`, cur);
+    if(v===null) return;
+    const t = v.trim();
+    if(t==='ع'){ setExcused(habit,date,true); }
+    else if(t===''){ setExcused(habit,date,false); delete habit.entries[date]; }
+    else { const n = parseFloat(t.replace(/[٠-٩]/g,c=>'٠١٢٣٤٥٦٧٨٩'.indexOf(c))); if(isNaN(n)) return; setExcused(habit,date,false); if(n>0) habit.entries[date]=n; else delete habit.entries[date]; }
+  } else {
+    // cycle: empty → done → excused → empty
+    if(isExcused(habit,date)) setExcused(habit,date,false);
+    else if(wasDone){ delete habit.entries[date]; setExcused(habit,date,true); }
+    else habit.entries[date] = true;
+  }
+  if(!wasDone && isDone(habit,date) && date===todayStr()){ playChime(); checkMilestone(habit); }
   saveHabits(); render();
 };
 
@@ -590,7 +717,7 @@ function renderSlide(habit){
     <div class="slide-wrap">
       <div class="slide-track ${done?'done':''}" id="track-${habit.id}" data-habit="${habit.id}" onpointerdown="slideStart(event,'${habit.id}')">
         <div class="slide-fill animated" id="fill-${habit.id}" style="width:${done?'100':'0'}%"></div>
-        <div class="slide-label ${done?'on-fill':''}" id="label-${habit.id}">${done ? 'تمت اليوم ✓ — اسحب للإلغاء' : 'اسحب لليمين لتأكيد اليوم →'}</div>
+        <div class="slide-label ${done?'on-fill':''}" id="label-${habit.id}">${done ? 'تمت اليوم ✓ — اسحب للإلغاء' : (isScheduled(habit,today) ? 'اسحب لليمين لتأكيد اليوم →' : 'مو مطلوبة اليوم — اسحب لو سويتها →')}</div>
         <div class="slide-thumb animated" id="thumb-${habit.id}" style="right:${done?'calc(100% - 43px)':'3px'}">${done?'✓':'○'}</div>
       </div>
     </div>
@@ -648,13 +775,73 @@ function slideEnd(){
 }
 
 // ---------- Habits view (list only, no calendar) ----------
+let editingHabit = null;
+function habitMeta(h){
+  const parts = [scheduleText(h)];
+  if(hType(h)==='count') parts.push(`الهدف ${fmtNum(hTarget(h))} ${escapeHtml(h.unit||'')}`.trim());
+  if(isWeekly(h)){ const w = weekInfo(h, weekStart(todayStr())); parts.push(`هالأسبوع ${w.done}/${w.req}`); }
+  return parts.join(' · ');
+}
+function countStep(h){ const t=hTarget(h); return h.step ? Number(h.step) : (t>=2000 ? 500 : t>=200 ? 10 : t>=20 ? 5 : 1); }
+function renderCounter(h){
+  const today=todayStr(), v=entryVal(h,today), p=progressOf(h,today);
+  return `
+    <div class="counter ${p>=1?'done':''}">
+      <div class="counter-fill" style="width:${Math.round(p*100)}%"></div>
+      <button class="cbtn" onclick="bumpCount('${h.id}',-1)">−</button>
+      <div class="cval mono" onclick="typeCount('${h.id}')">${fmtNum(v)} / ${fmtNum(hTarget(h))} <span class="cunit">${escapeHtml(h.unit||'')}</span>${p>=1?' ✓':''}</div>
+      <button class="cbtn" onclick="bumpCount('${h.id}',1)">+</button>
+    </div>`;
+}
+function renderTodayControl(h){
+  const today=todayStr();
+  if(isExcused(h,today)) return `<div class="excused-bar" onclick="toggleExcuse('${h.id}')">معذور اليوم — ما يأثر على الستريك · اضغط للإلغاء</div>`;
+  return hType(h)==='count' ? renderCounter(h) : renderSlide(h);
+}
+function renderHabitSettings(h){
+  const s=hSched(h), days=s.days||[];
+  return `
+    <div class="habit-settings">
+      <label>الاسم<input type="text" id="hs-name" value="${escapeHtml(h.name)}"></label>
+      <label>النوع
+        <select id="hs-type" onchange="document.getElementById('hs-count').style.display=this.value==='count'?'flex':'none'">
+          <option value="check" ${hType(h)==='check'?'selected':''}>تم / ما تم</option>
+          <option value="count" ${hType(h)==='count'?'selected':''}>بالعدد أو الكمية</option>
+        </select>
+      </label>
+      <div id="hs-count" class="hs-row" style="display:${hType(h)==='count'?'flex':'none'}">
+        <label>الهدف اليومي<input type="number" id="hs-target" min="1" step="any" value="${h.target||''}" placeholder="50"></label>
+        <label>الوحدة<input type="text" id="hs-unit" value="${escapeHtml(h.unit||'')}" placeholder="صفحة / خطوة / ساعة"></label>
+      </div>
+      <label>التكرار
+        <select id="hs-sched" onchange="document.getElementById('hs-days').style.display=this.value==='days'?'flex':'none';document.getElementById('hs-times').style.display=this.value==='weekly'?'flex':'none'">
+          <option value="daily" ${s.type==='daily'||!s.type?'selected':''}>يومياً</option>
+          <option value="days" ${s.type==='days'?'selected':''}>أيام محددة</option>
+          <option value="weekly" ${s.type==='weekly'?'selected':''}>عدد مرات بالأسبوع</option>
+        </select>
+      </label>
+      <div id="hs-days" class="hs-days" style="display:${s.type==='days'?'flex':'none'}">
+        ${DOW_FULL.map((n,i)=>`<label class="daychip"><input type="checkbox" value="${i}" ${days.includes(i)?'checked':''}><span>${n}</span></label>`).join('')}
+      </div>
+      <div id="hs-times" class="hs-row" style="display:${s.type==='weekly'?'flex':'none'}">
+        <label>كم مرة بالأسبوع؟<input type="number" id="hs-times-n" min="1" max="7" value="${s.times||4}"></label>
+      </div>
+      <div class="hs-actions">
+        <button class="btn sm" onclick="saveHabitSettings('${h.id}')">حفظ</button>
+        <button class="btn ghost sm" onclick="editHabit(null)">إلغاء</button>
+      </div>
+    </div>`;
+}
 function renderHabitsView(){
+  const today=todayStr();
+  const allExcused = state.habits.length && state.habits.every(h=>isExcused(h,today));
   let html = `
     <div class="add-card">
       <div class="add-row">
         <input type="text" id="new-habit-name" placeholder="اسم عادة جديدة… مثل: قراءة 20 دقيقة" onkeydown="if(event.key==='Enter')addHabit()">
         <button class="btn" onclick="addHabit()">+ إضافة عادة</button>
         <button class="btn ghost sm" onclick="toggleBulk()">إضافة عدة عادات دفعة واحدة</button>
+        ${state.habits.length?`<button class="btn ghost sm" onclick="toggleExcuseAll()">${allExcused?'إلغاء عذر اليوم':'اليوم معذور (سفر/مرض)'}</button>`:''}
       </div>
       <div id="bulk-wrap" style="display:none;margin-top:12px;">
         <textarea id="bulk-input" placeholder="اكتب كل عادة في سطر منفصل…" style="min-height:120px;"></textarea>
@@ -672,27 +859,77 @@ function renderHabitsView(){
       const pct = computePercentage(habit);
       const isConfirming = confirmingDelete===habit.id;
       const initial = habit.name.trim().charAt(0) || '؟';
+      const exc = isExcused(habit,today);
       html += `
-        <div class="habit-card">
+        <div class="habit-card ${!isWeekly(habit)&&!isScheduled(habit,today)&&!isDone(habit,today)?'rest':''}">
           <div class="habit-head">
             <div class="habit-name-wrap">
               <div class="monogram">${escapeHtml(initial)}</div>
-              <div class="habit-name">${escapeHtml(habit.name)}</div>
+              <div style="min-width:0"><div class="habit-name">${escapeHtml(habit.name)}</div><div class="habit-meta">${habitMeta(habit)}</div></div>
             </div>
             <div class="stats">
-              <div class="stat"><div class="num mono">${s.current}🔥${milestoneBadge(s.current)?' '+milestoneBadge(s.current):''}</div><div class="lbl">الحالي</div></div>
+              <div class="stat"><div class="num mono">${s.current}🔥${s.unit==='day'&&milestoneBadge(s.current)?' '+milestoneBadge(s.current):''}</div><div class="lbl">${streakUnitLabel(s)}</div></div>
               <div class="stat"><div class="num mono">${pct}%</div><div class="lbl">النسبة</div></div>
               <div class="stat"><div class="num mono">${s.best}</div><div class="lbl">الأفضل</div></div>
               <button class="del-btn ${isConfirming?'confirm':''}" onclick="deleteHabit('${habit.id}')">${isConfirming?'تأكيد الحذف؟':'✕'}</button>
             </div>
           </div>
-          ${renderSlide(habit)}
+          ${renderTodayControl(habit)}
+          <div class="habit-tools">
+            ${exc?'':`<button class="tool-btn" onclick="toggleExcuse('${habit.id}')">معذور اليوم</button>`}
+            <button class="tool-btn" onclick="editHabit('${habit.id}')">⚙ إعدادات</button>
+          </div>
+          ${editingHabit===habit.id ? renderHabitSettings(habit) : ''}
         </div>
       `;
     });
   }
   return html;
 }
+window.editHabit = function(id){ editingHabit = editingHabit===id ? null : id; render(); };
+window.saveHabitSettings = function(id){
+  const h = state.habits.find(x=>x.id===id); if(!h) return;
+  const name = document.getElementById('hs-name').value.trim(); if(name) h.name = name;
+  h.type = document.getElementById('hs-type').value;
+  if(h.type==='count'){
+    const t = parseFloat(document.getElementById('hs-target').value);
+    if(!(t>0)){ showToast('اكتب هدف يومي أكبر من صفر'); return; }
+    h.target = t; h.unit = document.getElementById('hs-unit').value.trim();
+  }
+  const st = document.getElementById('hs-sched').value;
+  if(st==='days'){
+    const days = [...document.querySelectorAll('#hs-days input:checked')].map(x=>parseInt(x.value));
+    if(!days.length){ showToast('اختر يوم واحد على الأقل'); return; }
+    h.schedule = {type:'days', days};
+  } else if(st==='weekly'){
+    h.schedule = {type:'weekly', times: Math.max(1, Math.min(7, parseInt(document.getElementById('hs-times-n').value)||3))};
+  } else h.schedule = {type:'daily'};
+  editingHabit = null; saveHabits(); render(); showToast('تم حفظ الإعدادات ✓');
+};
+window.toggleExcuse = function(id){
+  const h = state.habits.find(x=>x.id===id); if(!h) return;
+  const d = todayStr(); setExcused(h, d, !isExcused(h,d)); saveHabits(); render();
+};
+window.toggleExcuseAll = function(){
+  const d = todayStr(); const all = state.habits.every(h=>isExcused(h,d));
+  if(!all && !confirm('تعليم اليوم "معذور" لكل العادات؟ أي إنجاز مسجّل اليوم بينشال.')) return;
+  state.habits.forEach(h=>setExcused(h, d, !all)); saveHabits(); render();
+};
+function setCount(h, n){
+  const d = todayStr(), was = isDone(h,d);
+  n = Math.max(0, Math.round(n*100)/100);
+  if(n>0) h.entries[d] = n; else delete h.entries[d];
+  if(!was && isDone(h,d)){ playChime(); checkMilestone(h); }
+  saveHabits(); render();
+}
+window.bumpCount = function(id, dir){ const h = state.habits.find(x=>x.id===id); if(!h) return; setCount(h, entryVal(h,todayStr()) + dir*countStep(h)); };
+window.typeCount = function(id){
+  const h = state.habits.find(x=>x.id===id); if(!h) return;
+  const v = prompt(`كم سجّلت اليوم في «${h.name}»؟ (الهدف ${fmtNum(hTarget(h))} ${h.unit||''})`, fmtNum(entryVal(h,todayStr())));
+  if(v===null) return;
+  const n = parseFloat(v.replace(/[٠-٩]/g,c=>'٠١٢٣٤٥٦٧٨٩'.indexOf(c)));
+  if(!isNaN(n)) setCount(h, n);
+};
 
 window.addHabit = function(){
   const input = document.getElementById('new-habit-name');
@@ -748,10 +985,10 @@ function renderHistoryView(){
         <div class="habit-head">
           <div class="habit-name-wrap">
             <div class="monogram">${escapeHtml(habit.name.trim().charAt(0)||'؟')}</div>
-            <div class="habit-name">${escapeHtml(habit.name)}</div>
+            <div><div class="habit-name">${escapeHtml(habit.name)}</div><div class="habit-meta">${habitMeta(habit)}</div></div>
           </div>
           <div class="stats">
-            <div class="stat"><div class="num mono">${s.current}🔥${milestoneBadge(s.current)?' '+milestoneBadge(s.current):''}</div><div class="lbl">الحالي</div></div>
+            <div class="stat"><div class="num mono">${s.current}🔥${s.unit==='day'&&milestoneBadge(s.current)?' '+milestoneBadge(s.current):''}</div><div class="lbl">${streakUnitLabel(s)}</div></div>
             <div class="stat"><div class="num mono">${pct}%</div><div class="lbl">النسبة</div></div>
             <div class="stat"><div class="num mono">${s.total}</div><div class="lbl">الإجمالي</div></div>
           </div>
@@ -780,27 +1017,17 @@ function renderDashboard(){
     </div>`;
   }
   const today = todayStr();
-  const doneToday = state.habits.filter(h=>h.entries[today]).length;
-  const todayPct = Math.round((doneToday/state.habits.length)*100);
+  const dueToday = state.habits.filter(h=>!isWeekly(h) && isScheduled(h,today) && !isExcused(h,today) && startOf(h)<=today);
+  const todayPct = dueToday.length ? Math.round(dueToday.reduce((a,h)=>a+progressOf(h,today),0)/dueToday.length*100) : 100;
 
   // week matrix: last 7 days including today
   const last7 = [];
   for(let i=6;i>=0;i--){ const d=new Date(); d.setDate(d.getDate()-i); last7.push(fmtDate(d)); }
-  const weekDoneTotal = state.habits.reduce((acc,h)=> acc + last7.filter(d=>h.entries[d]).length, 0);
-  const weekPct = Math.round((weekDoneTotal/(state.habits.length*7))*100);
+  const weekPct = windowPct(last7) ?? 0;
 
   // month
-  const monthStart = new Date(); monthStart.setDate(1);
-  const daysThisMonthSoFar = new Date().getDate();
-  const monthDoneTotal = state.habits.reduce((acc,h)=>{
-    let c=0;
-    for(let d=1; d<=daysThisMonthSoFar; d++){
-      const ds = `${monthStart.getFullYear()}-${String(monthStart.getMonth()+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-      if(h.entries[ds]) c++;
-    }
-    return acc+c;
-  },0);
-  const monthPct = Math.round((monthDoneTotal/(state.habits.length*daysThisMonthSoFar))*100);
+  const monthDays = []; for(let d=1; d<=new Date().getDate(); d++){ const x=new Date(); x.setDate(d); monthDays.push(fmtDate(x)); }
+  const monthPct = windowPct(monthDays) ?? 0;
 
   const sorted = [...state.habits].sort((a,b)=>computePercentage(b)-computePercentage(a));
 
@@ -822,7 +1049,9 @@ function renderDashboard(){
   state.habits.forEach(h=>{
     matrixHtml += `<div class="wm-name">${escapeHtml(h.name)}</div>`;
     last7.forEach(d=>{
-      matrixHtml += `<div class="wm-cell ${h.entries[d]?'on':''}"></div>`;
+      const done = isDone(h,d), exc = isExcused(h,d), off = !isWeekly(h) && !isScheduled(h,d);
+      const part = !done && hType(h)==='count' ? progressOf(h,d) : 0;
+      matrixHtml += `<div class="wm-cell ${done?'on':''} ${exc?'excused':''} ${off?'off':''}" ${part>0?`style="--p:${(0.2+part*0.6).toFixed(2)}" data-part="1"`:''}></div>`;
     });
   });
   matrixHtml += `</div>`;
@@ -867,9 +1096,7 @@ function computeWeeklyTrend(weeksCount){
     const windowEnd = new Date(); windowEnd.setDate(windowEnd.getDate() - i*7);
     const days = [];
     for(let d=6; d>=0; d--){ const dt = new Date(windowEnd); dt.setDate(dt.getDate()-d); days.push(fmtDate(dt)); }
-    const doneCount = state.habits.reduce((acc,h)=> acc + days.filter(ds=>h.entries[ds]).length, 0);
-    const total = Math.max(1, state.habits.length*7);
-    const pct = Math.round((doneCount/total)*100);
+    const pct = windowPct(days) ?? 0;
     points.push({ label: windowEnd, pct });
   }
   return points;
@@ -1165,9 +1392,12 @@ function renderJournalView(){
     const dateStr = `${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const isToday = dateStr===today; const isSelected = dateStr===selectedDate;
     const hasEntry = !!(state.journal[dateStr] && state.journal[dateStr].trim());
-    cellsHtml += `<div class="cal-day ${isToday?'today':''} ${isSelected?'selected':''}" onclick="selectDate('${dateStr}')">${d}${hasEntry?'<div class="has-entry"></div>':''}</div>`;
+    const hd = hijriStr(new Date(calYear, calMonth, d), {day:'numeric'});
+    cellsHtml += `<div class="cal-day ${isToday?'today':''} ${isSelected?'selected':''}" onclick="selectDate('${dateStr}')">${d}<span class="hday">${hd}</span>${hasEntry?'<div class="has-entry"></div>':''}</div>`;
   }
-  const monthName = new Date(calYear, calMonth, 1).toLocaleDateString('ar-SA-u-nu-latn',{month:'long', year:'numeric'});
+  const monthName = gregStr(new Date(calYear, calMonth, 1),{month:'long', year:'numeric'});
+  const hA = hijriStr(new Date(calYear, calMonth, 1),{month:'long'}), hB = hijriStr(new Date(calYear, calMonth, daysInMonth),{month:'long', year:'numeric'});
+  const hijriRange = (hA && hB) ? (hB.startsWith(hA) ? hB : hA+' – '+hB) : '';
   const entryText = state.journal[selectedDate] || '';
   const [sy,sm,sd] = selectedDate.split('-');
   return searchBar + `
@@ -1175,7 +1405,7 @@ function renderJournalView(){
       <div class="cal-card">
         <div class="cal-nav">
           <button class="nav-btn" onclick="changeMonth(1)">‹</button>
-          <div class="label">${monthName}</div>
+          <div class="label">${monthName}<div class="hijri-sub">${hijriRange}</div></div>
           <button class="nav-btn" onclick="changeMonth(-1)">›</button>
         </div>
         <div class="cal-grid">
@@ -1184,7 +1414,7 @@ function renderJournalView(){
         </div>
       </div>
       <div class="entry-card">
-        <div class="entry-date">تدوينة يوم <span class="mono">${sd}/${sm}/${sy}</span></div>
+        <div class="entry-date">تدوينة يوم <span class="mono">${sd}/${sm}/${sy}</span> <span class="hijri-sub" style="display:inline">· ${hijriStr(parseD(selectedDate),{day:'numeric',month:'long',year:'numeric'})}</span></div>
         <textarea id="journal-text" placeholder="اكتب هنا أي شيء يخص هذا اليوم… أفكار، إنجازات، ملاحظات…" oninput="onJournalInput(this.value)">${escapeHtml(entryText)}</textarea>
         <div class="save-row">
           <div class="save-hint" id="save-hint">يُحفظ تلقائيًا</div>
@@ -1229,6 +1459,8 @@ window.onJournalInput = function(val){
   }, 500);
 };
 
+function gregStr(d,o){ try{ return d.toLocaleDateString('ar-SA-u-ca-gregory-nu-latn', o); }catch(e){ return d.toLocaleDateString('ar', o); } }
+function hijriStr(d,o){ try{ return d.toLocaleDateString('ar-SA-u-ca-islamic-umalqura-nu-latn', o); }catch(e){ return ''; } }
 function escapeHtml(s){ const div = document.createElement('div'); div.textContent = s; return div.innerHTML; }
 
 window.toggleTheme = function(){
@@ -1254,7 +1486,7 @@ function render(){
         <div class="sub">تتبّع عاداتك اليومية وغير حياتك </div>
       </div>
       <div class="hero-right">
-        <div class="today-badge mono">${new Date().toLocaleDateString('ar-SA',{weekday:'long', day:'numeric', month:'long'})}</div>
+        <div class="today-badge" style="font-family:Cairo,sans-serif">${gregStr(new Date(),{weekday:'long', day:'numeric', month:'long'})}<span class="hijri">${hijriStr(new Date(),{day:'numeric', month:'long', year:'numeric'})}</span></div>
         <div class="theme-btn" id="cloud-btn" onclick="cloudAction()" title="${cloudTitle()}" style="width:auto;min-width:38px;padding:0 10px;border-radius:19px;font-size:14px;">${cloudIcon()}</div>
         <div class="theme-btn" onclick="cycleSound()" title="صوت الإنجاز: ${SOUNDS.find(x=>x.id===soundId).label} — اضغط للتغيير">${SOUNDS.find(x=>x.id===soundId).icon}</div>
         <div class="theme-btn" onclick="toggleTheme()" title="تبديل النمط">${theme==='dark'?'☀':'☾'}</div>
