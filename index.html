@@ -282,6 +282,7 @@ async function loadState(){
   try{ const b = await storage.get('ratm-books'); if(b && b.value) state.books = JSON.parse(b.value); }catch(e){ state.books = []; }
   try{ const rg = await storage.get('ratm-reading-goal'); if(rg && rg.value) state.readingGoal = JSON.parse(rg.value); }catch(e){ state.readingGoal = null; }
   try{ const t = await storage.get('ratm-theme'); if(t && t.value) theme = t.value; }catch(e){ theme='light'; }
+  try{ const sd = await storage.get('ratm-sound'); if(sd && sd.value && SOUNDS.some(x=>x.id===sd.value)) soundId = sd.value; }catch(e){ soundId='chime'; }
   // backfill createdAt for habits saved before this feature existed
   state.habits.forEach(h=>{
     if(!h.createdAt){
@@ -307,23 +308,49 @@ async function saveBooks(){ try{ await storage.set('ratm-books', JSON.stringify(
 async function saveReadingGoal(){ try{ await storage.set('ratm-reading-goal', JSON.stringify(state.readingGoal)); }catch(e){ console.error(e); } }
 async function saveTheme(){ try{ await storage.set('ratm-theme', theme); }catch(e){ console.error(e); } }
 
-function playChime(){
+const SOUNDS = [
+  {id:'chime', label:'جرس ثلاثي', icon:'♪'},
+  {id:'tap',   label:'نقرة خفيفة', icon:'•'},
+  {id:'bell',  label:'جرس عميق', icon:'◎'},
+  {id:'levelup', label:'Level up', icon:'▲'},
+  {id:'off',   label:'بدون صوت', icon:'✕'}
+];
+let soundId = 'chime';
+function tone(freq, t0, dur, peak, type){
+  const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+  o.type = type||'sine'; o.frequency.setValueAtTime(freq, t0);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(peak, t0+0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start(t0); o.stop(t0+dur+0.02);
+  return o;
+}
+function playChime(id){
+  id = id || soundId;
+  if(id==='off') return;
   try{
     if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
     if(audioCtx.state==='suspended') audioCtx.resume();
     const now = audioCtx.currentTime;
-    [523.25,659.25,783.99].forEach((freq,i)=>{
-      const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
-      o.type='sine'; o.frequency.value=freq;
-      const t0 = now + i*0.07;
-      g.gain.setValueAtTime(0.0001, t0);
-      g.gain.exponentialRampToValueAtTime(0.22, t0+0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0+0.28);
-      o.connect(g); g.connect(audioCtx.destination);
-      o.start(t0); o.stop(t0+0.3);
-    });
+    if(id==='tap'){
+      tone(1200, now, 0.06, 0.25, 'triangle');
+      tone(1800, now+0.045, 0.05, 0.12, 'triangle');
+    } else if(id==='bell'){
+      [220, 440, 660, 1320].forEach((f,i)=> tone(f, now, 1.2 - i*0.2, [0.25,0.18,0.08,0.04][i]));
+    } else if(id==='levelup'){
+      [392, 523.25, 659.25, 783.99, 1046.5].forEach((f,i)=> tone(f, now+i*0.06, 0.18, 0.16, 'square'));
+    } else {
+      [523.25,659.25,783.99].forEach((f,i)=> tone(f, now+i*0.07, 0.28, 0.22));
+    }
   }catch(e){}
 }
+async function saveSound(){ try{ await storage.set('ratm-sound', soundId); }catch(e){ console.error(e); } }
+window.cycleSound = function(){
+  const i = SOUNDS.findIndex(x=>x.id===soundId);
+  soundId = SOUNDS[(i+1)%SOUNDS.length].id;
+  saveSound(); playChime(); render();
+};
 
 function computeStreaks(habit){
   const entries = habit.entries || {};
@@ -1099,6 +1126,7 @@ function render(){
       </div>
       <div class="hero-right">
         <div class="today-badge mono">${new Date().toLocaleDateString('ar-SA',{weekday:'long', day:'numeric', month:'long'})}</div>
+        <div class="theme-btn" onclick="cycleSound()" title="صوت الإنجاز: ${SOUNDS.find(x=>x.id===soundId).label} — اضغط للتغيير">${SOUNDS.find(x=>x.id===soundId).icon}</div>
         <div class="theme-btn" onclick="toggleTheme()" title="تبديل النمط">${theme==='dark'?'☀':'☾'}</div>
       </div>
     </div>
